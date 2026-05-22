@@ -1,0 +1,527 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>Strawberry Farm Plot Planner</title>
+<style>
+* { box-sizing:border-box; margin:0; padding:0; }
+body { font-family:Arial,sans-serif; background:#f5f0e8; color:#4a3728; padding:16px; }
+h1 { text-align:center; font-size:1.4em; letter-spacing:.15em; color:#4a3728; margin-bottom:3px; font-family:'Courier New',monospace; }
+.subtitle { text-align:center; font-size:.8em; color:#7a6555; margin-bottom:12px; }
+
+.crop-panel { background:#eee8d8; border:1px solid #c8b89a; border-radius:8px; padding:10px 14px; margin-bottom:10px; }
+.crop-panel h3 { font-size:.78em; letter-spacing:.1em; margin-bottom:7px; color:#5a4030; font-family:'Courier New',monospace; }
+.crop-grid { display:flex; flex-wrap:wrap; gap:5px; }
+.crop-btn {
+  display:flex; align-items:center; gap:5px; padding:4px 10px;
+  border:2px solid transparent; border-radius:14px; background:#f5f0e8;
+  cursor:pointer; font-family:Arial,sans-serif; font-size:.75em; color:#4a3728; transition:all .12s;
+}
+.crop-btn:hover { opacity:.85; transform:scale(1.03); }
+.crop-btn.active { border-color:#4a3728; background:#fff; font-weight:bold; }
+.crop-btn .sw { width:12px; height:12px; border-radius:2px; flex-shrink:0; }
+.crop-btn.clr { background:#ddd; color:#555; }
+.crop-btn.clr.active { border-color:#555; }
+
+.controls { display:flex; gap:8px; justify-content:center; margin-bottom:10px; flex-wrap:wrap; }
+.controls button {
+  padding:5px 12px; border-radius:6px; border:1px solid #b8a890;
+  cursor:pointer; font-family:Arial,sans-serif; font-size:.75em; background:#eee8d8; color:#4a3728;
+}
+.controls button:hover { background:#ddd5c0; }
+
+#farm-svg { display:block; margin:0 auto; }
+
+.legend { margin-top:12px; background:#eee8d8; border:1px solid #c8b89a; border-radius:8px; padding:10px 14px; }
+.legend h3 { font-size:.75em; letter-spacing:.1em; margin-bottom:6px; color:#5a4030; font-family:'Courier New',monospace; }
+.legend-grid { display:flex; flex-wrap:wrap; gap:5px 14px; }
+.legend-item { display:flex; align-items:center; gap:5px; font-size:.72em; font-family:Arial,sans-serif; }
+.legend-swatch { width:12px; height:12px; border-radius:2px; flex-shrink:0; }
+
+.note-hint { text-align:center; font-size:.68em; color:#9a8a7a; margin-top:5px; font-family:Arial,sans-serif; }
+
+.modal-overlay {
+  display:none; position:fixed; inset:0; background:rgba(0,0,0,.4); z-index:200;
+  align-items:center; justify-content:center;
+}
+.modal-overlay.open { display:flex; }
+.modal { background:#f5f0e8; border:2px solid #8a7060; border-radius:10px; padding:20px; width:320px; max-width:95vw; }
+.modal h3 { font-size:.95em; margin-bottom:9px; color:#4a3728; font-family:Arial,sans-serif; }
+.modal textarea {
+  width:100%; height:90px; border:1px solid #b8a890; border-radius:5px;
+  background:#fff; font-family:Arial,sans-serif; font-size:.85em; color:#4a3728; padding:7px; resize:vertical;
+}
+.modal-actions { display:flex; gap:7px; margin-top:9px; justify-content:flex-end; }
+.modal-actions button {
+  padding:5px 12px; border-radius:5px; border:1px solid #b8a890;
+  cursor:pointer; font-family:Arial,sans-serif; font-size:.78em;
+}
+.btn-save { background:#5a7a4a; color:#fff; border-color:#4a6a3a; }
+.btn-cancel { background:#eee8d8; color:#4a3728; }
+.btn-clr-note { background:#c87060; color:#fff; border-color:#a85040; }
+
+/* Share Code modal */
+#shareModal textarea {
+  width:100%; height:120px; border:1px solid #b8a890; border-radius:5px;
+  background:#fff; font-family:'Courier New',monospace; font-size:.78em; color:#4a3728;
+  padding:7px; resize:vertical; word-break:break-all;
+}
+#shareModal .share-hint { font-size:.72em; color:#7a6555; margin-bottom:6px; }
+.btn-copy { background:#3a6a9a; color:#fff; border-color:#2a5a8a; }
+</style>
+</head>
+<body>
+
+<h1>STRAWBERRY FARM PLOT PLANNER</h1>
+<p class="subtitle">Click a crop · click a bed to assign · right-click a bed to add a note</p>
+
+<div class="crop-panel">
+  <h3>SELECT CROP TO PAINT</h3>
+  <div class="crop-grid" id="cropGrid"></div>
+</div>
+<div class="controls">
+  <button onclick="clearAll()">Clear All</button>
+  <button onclick="exportData()">Export JSON</button>
+  <button onclick="importData()">Import JSON</button>
+  <button onclick="openShareModal()">📋 Share Code</button>
+  <button onclick="openLoadModal()">📥 Load Code</button>
+</div>
+
+<!--
+LAYOUT:
+SVG: 760w × 660h, viewBox 0 0 760 660
+
+Perimeter polygon: 22,22 738,22 738,460 325,632 325,646 295,646 295,632 22,632
+
+HORIZONTAL BEDS: x=30, w=210 (beds 1-8), tapering for 9-18, h=28, step=32, y starts at 44
+PATH vertical strip: x=244, y=44, w=18, h=580
+VERTICAL TOP BEDS: 11 beds, x=266 step=43, w=40, h=155, y=44
+PATH horizontal bar: x=266, y=203, w=470, h=16
+MIDDLE VERTICAL BEDS: 10 cols (vla1/vlb1 … vla10/vlb10), x=266 step=43, w=40, h=110, gap=10
+  Top half y=223, bottom half y=343
+BOTTOM VERTICAL BEDS: 6 beds (vlb1–vlb6 only), same x as middle cols 1-6
+  y=343, h=110
+
+IDs: h1–h18, vt1–vt11, vla1–vla10, vlb1–vlb6
+-->
+
+<svg id="farm-svg" width="760" height="660" viewBox="0 0 760 660" xmlns="http://www.w3.org/2000/svg">
+
+  <polygon
+    points="22,22 738,22 738,460 325,632 325,646 295,646 295,632 22,632"
+    fill="#ede7d5" stroke="#8a7060" stroke-width="3" stroke-dasharray="8,5"/>
+
+  <!-- Labels -->
+  <text x="380" y="14" text-anchor="middle" font-family="Courier New" font-size="11" fill="#8a7060" letter-spacing="3">■■  FENCE  ■■</text>
+  <text x="12" y="330" text-anchor="middle" font-family="Courier New" font-size="9" fill="#8a7060" transform="rotate(-90,12,330)" letter-spacing="2">FENCE</text>
+  <text x="748" y="240" text-anchor="middle" font-family="Courier New" font-size="9" fill="#8a7060" transform="rotate(90,748,240)" letter-spacing="2">FENCE</text>
+  <text x="310" y="658" text-anchor="middle" font-family="Courier New" font-size="10" fill="#8a7060" letter-spacing="2">GATE</text>
+
+  <!-- Section headers -->
+  <text x="136" y="36" text-anchor="middle" font-family="Courier New" font-size="9" fill="#7a6555" letter-spacing="1">HORIZONTAL BEDS</text>
+  <text x="502" y="36" text-anchor="middle" font-family="Courier New" font-size="9" fill="#7a6555" letter-spacing="1">VERTICAL BEDS</text>
+
+  <!-- Compass -->
+  <circle cx="726" cy="30" r="10" fill="none" stroke="#8a7060" stroke-width="1.5"/>
+  <text x="726" y="34" text-anchor="middle" font-family="Courier New" font-size="9" fill="#8a7060">N</text>
+
+  <!-- PATH vertical strip -->
+  <rect x="244" y="44" width="18" height="580" fill="#ddd5c0" rx="2"/>
+  <text x="253" y="340" text-anchor="middle" font-family="Courier New" font-size="8" fill="#9a8a7a" transform="rotate(-90,253,340)" letter-spacing="2">PATH</text>
+
+  <!-- SUN / SHADE labels -->
+  <text x="748" y="130" text-anchor="middle" font-family="Arial" font-size="9" fill="#b8860b">★ SUN</text>
+  <text x="748" y="340" text-anchor="middle" font-family="Arial" font-size="9" fill="#7a8a9a">~ SHADE</text>
+
+  <!-- ══════════ HORIZONTAL BEDS 1–18 ══════════ -->
+  <g id="horiz-beds">
+    <!-- H1  --><g class="bed-group" data-id="h1" ><rect class="bed-rect" x="30" y="44"  width="210" height="28" rx="3" fill="#d9d1be" stroke="#b8a890" stroke-width="1"/><text x="38"  y="62"  font-family="Courier New" font-size="9" fill="#7a6a5a">1</text> <text class="bed-label" x="145" y="63"  text-anchor="middle" font-family="Arial" font-size="11" fill="#2a1a0a" font-weight="bold"></text><text class="bed-note" x="145" y="63"  text-anchor="middle" font-family="Arial" font-size="9"  fill="#1a1a1a" font-weight="bold"></text></g>
+    <!-- H2  --><g class="bed-group" data-id="h2" ><rect class="bed-rect" x="30" y="76"  width="210" height="28" rx="3" fill="#d9d1be" stroke="#b8a890" stroke-width="1"/><text x="38"  y="94"  font-family="Courier New" font-size="9" fill="#7a6a5a">2</text> <text class="bed-label" x="145" y="95"  text-anchor="middle" font-family="Arial" font-size="11" fill="#2a1a0a" font-weight="bold"></text><text class="bed-note" x="145" y="95"  text-anchor="middle" font-family="Arial" font-size="9"  fill="#1a1a1a" font-weight="bold"></text></g>
+    <!-- H3  --><g class="bed-group" data-id="h3" ><rect class="bed-rect" x="30" y="108" width="210" height="28" rx="3" fill="#d9d1be" stroke="#b8a890" stroke-width="1"/><text x="38"  y="126" font-family="Courier New" font-size="9" fill="#7a6a5a">3</text> <text class="bed-label" x="145" y="127" text-anchor="middle" font-family="Arial" font-size="11" fill="#2a1a0a" font-weight="bold"></text><text class="bed-note" x="145" y="127" text-anchor="middle" font-family="Arial" font-size="9"  fill="#1a1a1a" font-weight="bold"></text></g>
+    <!-- H4  --><g class="bed-group" data-id="h4" ><rect class="bed-rect" x="30" y="140" width="210" height="28" rx="3" fill="#d9d1be" stroke="#b8a890" stroke-width="1"/><text x="38"  y="158" font-family="Courier New" font-size="9" fill="#7a6a5a">4</text> <text class="bed-label" x="145" y="159" text-anchor="middle" font-family="Arial" font-size="11" fill="#2a1a0a" font-weight="bold"></text><text class="bed-note" x="145" y="159" text-anchor="middle" font-family="Arial" font-size="9"  fill="#1a1a1a" font-weight="bold"></text></g>
+    <!-- H5  --><g class="bed-group" data-id="h5" ><rect class="bed-rect" x="30" y="172" width="210" height="28" rx="3" fill="#d9d1be" stroke="#b8a890" stroke-width="1"/><text x="38"  y="190" font-family="Courier New" font-size="9" fill="#7a6a5a">5</text> <text class="bed-label" x="145" y="191" text-anchor="middle" font-family="Arial" font-size="11" fill="#2a1a0a" font-weight="bold"></text><text class="bed-note" x="145" y="191" text-anchor="middle" font-family="Arial" font-size="9"  fill="#1a1a1a" font-weight="bold"></text></g>
+    <!-- H6  --><g class="bed-group" data-id="h6" ><rect class="bed-rect" x="30" y="204" width="210" height="28" rx="3" fill="#d9d1be" stroke="#b8a890" stroke-width="1"/><text x="38"  y="222" font-family="Courier New" font-size="9" fill="#7a6a5a">6</text> <text class="bed-label" x="145" y="223" text-anchor="middle" font-family="Arial" font-size="11" fill="#2a1a0a" font-weight="bold"></text><text class="bed-note" x="145" y="223" text-anchor="middle" font-family="Arial" font-size="9"  fill="#1a1a1a" font-weight="bold"></text></g>
+    <!-- H7  --><g class="bed-group" data-id="h7" ><rect class="bed-rect" x="30" y="236" width="210" height="28" rx="3" fill="#d9d1be" stroke="#b8a890" stroke-width="1"/><text x="38"  y="254" font-family="Courier New" font-size="9" fill="#7a6a5a">7</text> <text class="bed-label" x="145" y="255" text-anchor="middle" font-family="Arial" font-size="11" fill="#2a1a0a" font-weight="bold"></text><text class="bed-note" x="145" y="255" text-anchor="middle" font-family="Arial" font-size="9"  fill="#1a1a1a" font-weight="bold"></text></g>
+    <!-- H8  --><g class="bed-group" data-id="h8" ><rect class="bed-rect" x="30" y="268" width="210" height="28" rx="3" fill="#d9d1be" stroke="#b8a890" stroke-width="1"/><text x="38"  y="286" font-family="Courier New" font-size="9" fill="#7a6a5a">8</text> <text class="bed-label" x="145" y="287" text-anchor="middle" font-family="Arial" font-size="11" fill="#2a1a0a" font-weight="bold"></text><text class="bed-note" x="145" y="287" text-anchor="middle" font-family="Arial" font-size="9"  fill="#1a1a1a" font-weight="bold"></text></g>
+    <!-- H9  --><g class="bed-group" data-id="h9" ><rect class="bed-rect" x="34"  y="300" width="204" height="28" rx="3" fill="#d9d1be" stroke="#b8a890" stroke-width="1"/><text x="42"  y="318" font-family="Courier New" font-size="9" fill="#7a6a5a">9</text> <text class="bed-label" x="143" y="319" text-anchor="middle" font-family="Arial" font-size="11" fill="#2a1a0a" font-weight="bold"></text><text class="bed-note" x="143" y="319" text-anchor="middle" font-family="Arial" font-size="9"  fill="#1a1a1a" font-weight="bold"></text></g>
+    <!-- H10 --><g class="bed-group" data-id="h10"><rect class="bed-rect" x="38"  y="332" width="198" height="28" rx="3" fill="#d9d1be" stroke="#b8a890" stroke-width="1"/><text x="46"  y="350" font-family="Courier New" font-size="9" fill="#7a6a5a">10</text><text class="bed-label" x="141" y="351" text-anchor="middle" font-family="Arial" font-size="11" fill="#2a1a0a" font-weight="bold"></text><text class="bed-note" x="141" y="351" text-anchor="middle" font-family="Arial" font-size="9"  fill="#1a1a1a" font-weight="bold"></text></g>
+    <!-- H11 --><g class="bed-group" data-id="h11"><rect class="bed-rect" x="42"  y="364" width="192" height="28" rx="3" fill="#d9d1be" stroke="#b8a890" stroke-width="1"/><text x="50"  y="382" font-family="Courier New" font-size="9" fill="#7a6a5a">11</text><text class="bed-label" x="141" y="383" text-anchor="middle" font-family="Arial" font-size="11" fill="#2a1a0a" font-weight="bold"></text><text class="bed-note" x="141" y="383" text-anchor="middle" font-family="Arial" font-size="9"  fill="#1a1a1a" font-weight="bold"></text></g>
+    <!-- H12 --><g class="bed-group" data-id="h12"><rect class="bed-rect" x="46"  y="396" width="186" height="28" rx="3" fill="#d9d1be" stroke="#b8a890" stroke-width="1"/><text x="54"  y="414" font-family="Courier New" font-size="9" fill="#7a6a5a">12</text><text class="bed-label" x="141" y="415" text-anchor="middle" font-family="Arial" font-size="11" fill="#2a1a0a" font-weight="bold"></text><text class="bed-note" x="141" y="415" text-anchor="middle" font-family="Arial" font-size="9"  fill="#1a1a1a" font-weight="bold"></text></g>
+    <!-- H13 --><g class="bed-group" data-id="h13"><rect class="bed-rect" x="50"  y="428" width="180" height="28" rx="3" fill="#d9d1be" stroke="#b8a890" stroke-width="1"/><text x="58"  y="446" font-family="Courier New" font-size="9" fill="#7a6a5a">13</text><text class="bed-label" x="142" y="447" text-anchor="middle" font-family="Arial" font-size="11" fill="#2a1a0a" font-weight="bold"></text><text class="bed-note" x="142" y="447" text-anchor="middle" font-family="Arial" font-size="9"  fill="#1a1a1a" font-weight="bold"></text></g>
+    <!-- H14 --><g class="bed-group" data-id="h14"><rect class="bed-rect" x="54"  y="460" width="174" height="28" rx="3" fill="#d9d1be" stroke="#b8a890" stroke-width="1"/><text x="62"  y="478" font-family="Courier New" font-size="9" fill="#7a6a5a">14</text><text class="bed-label" x="143" y="479" text-anchor="middle" font-family="Arial" font-size="11" fill="#2a1a0a" font-weight="bold"></text><text class="bed-note" x="143" y="479" text-anchor="middle" font-family="Arial" font-size="9"  fill="#1a1a1a" font-weight="bold"></text></g>
+    <!-- H15 --><g class="bed-group" data-id="h15"><rect class="bed-rect" x="58"  y="492" width="168" height="28" rx="3" fill="#d9d1be" stroke="#b8a890" stroke-width="1"/><text x="66"  y="510" font-family="Courier New" font-size="9" fill="#7a6a5a">15</text><text class="bed-label" x="144" y="511" text-anchor="middle" font-family="Arial" font-size="11" fill="#2a1a0a" font-weight="bold"></text><text class="bed-note" x="144" y="511" text-anchor="middle" font-family="Arial" font-size="9"  fill="#1a1a1a" font-weight="bold"></text></g>
+    <!-- H16 --><g class="bed-group" data-id="h16"><rect class="bed-rect" x="62"  y="524" width="162" height="28" rx="3" fill="#d9d1be" stroke="#b8a890" stroke-width="1"/><text x="70"  y="542" font-family="Courier New" font-size="9" fill="#7a6a5a">16</text><text class="bed-label" x="145" y="543" text-anchor="middle" font-family="Arial" font-size="11" fill="#2a1a0a" font-weight="bold"></text><text class="bed-note" x="145" y="543" text-anchor="middle" font-family="Arial" font-size="9"  fill="#1a1a1a" font-weight="bold"></text></g>
+    <!-- H17 --><g class="bed-group" data-id="h17"><rect class="bed-rect" x="66"  y="556" width="156" height="28" rx="3" fill="#d9d1be" stroke="#b8a890" stroke-width="1"/><text x="74"  y="574" font-family="Courier New" font-size="9" fill="#7a6a5a">17</text><text class="bed-label" x="146" y="575" text-anchor="middle" font-family="Arial" font-size="11" fill="#2a1a0a" font-weight="bold"></text><text class="bed-note" x="146" y="575" text-anchor="middle" font-family="Arial" font-size="9"  fill="#1a1a1a" font-weight="bold"></text></g>
+    <!-- H18 --><g class="bed-group" data-id="h18"><rect class="bed-rect" x="70"  y="588" width="150" height="28" rx="3" fill="#d9d1be" stroke="#b8a890" stroke-width="1"/><text x="78"  y="606" font-family="Courier New" font-size="9" fill="#7a6a5a">18</text><text class="bed-label" x="147" y="607" text-anchor="middle" font-family="Arial" font-size="11" fill="#2a1a0a" font-weight="bold"></text><text class="bed-note" x="147" y="607" text-anchor="middle" font-family="Arial" font-size="9"  fill="#1a1a1a" font-weight="bold"></text></g>
+  </g>
+
+  <!-- ══════════ VERTICAL TOP BEDS 1–11 ══════════
+    11 beds, x=266 step=43, w=40, h=155, y=44
+    Columns: 266,309,352,395,438,481,524,567,610,653,696
+  -->
+  <!-- VT1 x=266 --><g class="bed-group" data-id="vt1"><rect class="bed-rect" x="266" y="44" width="40" height="155" rx="3" fill="#d9d1be" stroke="#b8a890" stroke-width="1"/><text x="270" y="57" font-family="Courier New" font-size="8" fill="#7a6a5a">1</text><text class="bed-label" x="286" y="125" text-anchor="middle" font-family="Arial" font-size="10" fill="#2a1a0a" font-weight="bold" transform="rotate(-90,286,115)"></text><text class="bed-note" x="286" y="143" text-anchor="middle" font-family="Arial" font-size="8.5" fill="#1a1a1a" font-weight="bold" transform="rotate(-90,286,133)"></text></g>
+  <!-- VT2 x=309 --><g class="bed-group" data-id="vt2"><rect class="bed-rect" x="309" y="44" width="40" height="155" rx="3" fill="#d9d1be" stroke="#b8a890" stroke-width="1"/><text x="313" y="57" font-family="Courier New" font-size="8" fill="#7a6a5a">2</text><text class="bed-label" x="329" y="125" text-anchor="middle" font-family="Arial" font-size="10" fill="#2a1a0a" font-weight="bold" transform="rotate(-90,329,115)"></text><text class="bed-note" x="329" y="143" text-anchor="middle" font-family="Arial" font-size="8.5" fill="#1a1a1a" font-weight="bold" transform="rotate(-90,329,133)"></text></g>
+  <!-- VT3 x=352 --><g class="bed-group" data-id="vt3"><rect class="bed-rect" x="352" y="44" width="40" height="155" rx="3" fill="#d9d1be" stroke="#b8a890" stroke-width="1"/><text x="356" y="57" font-family="Courier New" font-size="8" fill="#7a6a5a">3</text><text class="bed-label" x="372" y="125" text-anchor="middle" font-family="Arial" font-size="10" fill="#2a1a0a" font-weight="bold" transform="rotate(-90,372,115)"></text><text class="bed-note" x="372" y="143" text-anchor="middle" font-family="Arial" font-size="8.5" fill="#1a1a1a" font-weight="bold" transform="rotate(-90,372,133)"></text></g>
+  <!-- VT4 x=395 --><g class="bed-group" data-id="vt4"><rect class="bed-rect" x="395" y="44" width="40" height="155" rx="3" fill="#d9d1be" stroke="#b8a890" stroke-width="1"/><text x="399" y="57" font-family="Courier New" font-size="8" fill="#7a6a5a">4</text><text class="bed-label" x="415" y="125" text-anchor="middle" font-family="Arial" font-size="10" fill="#2a1a0a" font-weight="bold" transform="rotate(-90,415,115)"></text><text class="bed-note" x="415" y="143" text-anchor="middle" font-family="Arial" font-size="8.5" fill="#1a1a1a" font-weight="bold" transform="rotate(-90,415,133)"></text></g>
+  <!-- VT5 x=438 --><g class="bed-group" data-id="vt5"><rect class="bed-rect" x="438" y="44" width="40" height="155" rx="3" fill="#d9d1be" stroke="#b8a890" stroke-width="1"/><text x="442" y="57" font-family="Courier New" font-size="8" fill="#7a6a5a">5</text><text class="bed-label" x="458" y="125" text-anchor="middle" font-family="Arial" font-size="10" fill="#2a1a0a" font-weight="bold" transform="rotate(-90,458,115)"></text><text class="bed-note" x="458" y="143" text-anchor="middle" font-family="Arial" font-size="8.5" fill="#1a1a1a" font-weight="bold" transform="rotate(-90,458,133)"></text></g>
+  <!-- VT6 x=481 --><g class="bed-group" data-id="vt6"><rect class="bed-rect" x="481" y="44" width="40" height="155" rx="3" fill="#d9d1be" stroke="#b8a890" stroke-width="1"/><text x="485" y="57" font-family="Courier New" font-size="8" fill="#7a6a5a">6</text><text class="bed-label" x="501" y="125" text-anchor="middle" font-family="Arial" font-size="10" fill="#2a1a0a" font-weight="bold" transform="rotate(-90,501,115)"></text><text class="bed-note" x="501" y="143" text-anchor="middle" font-family="Arial" font-size="8.5" fill="#1a1a1a" font-weight="bold" transform="rotate(-90,501,133)"></text></g>
+  <!-- VT7 x=524 --><g class="bed-group" data-id="vt7"><rect class="bed-rect" x="524" y="44" width="40" height="155" rx="3" fill="#d9d1be" stroke="#b8a890" stroke-width="1"/><text x="528" y="57" font-family="Courier New" font-size="8" fill="#7a6a5a">7</text><text class="bed-label" x="544" y="125" text-anchor="middle" font-family="Arial" font-size="10" fill="#2a1a0a" font-weight="bold" transform="rotate(-90,544,115)"></text><text class="bed-note" x="544" y="143" text-anchor="middle" font-family="Arial" font-size="8.5" fill="#1a1a1a" font-weight="bold" transform="rotate(-90,544,133)"></text></g>
+  <!-- VT8 x=567 --><g class="bed-group" data-id="vt8"><rect class="bed-rect" x="567" y="44" width="40" height="155" rx="3" fill="#d9d1be" stroke="#b8a890" stroke-width="1"/><text x="571" y="57" font-family="Courier New" font-size="8" fill="#7a6a5a">8</text><text class="bed-label" x="587" y="125" text-anchor="middle" font-family="Arial" font-size="10" fill="#2a1a0a" font-weight="bold" transform="rotate(-90,587,115)"></text><text class="bed-note" x="587" y="143" text-anchor="middle" font-family="Arial" font-size="8.5" fill="#1a1a1a" font-weight="bold" transform="rotate(-90,587,133)"></text></g>
+  <!-- VT9 x=610 --><g class="bed-group" data-id="vt9"><rect class="bed-rect" x="610" y="44" width="40" height="155" rx="3" fill="#d9d1be" stroke="#b8a890" stroke-width="1"/><text x="614" y="57" font-family="Courier New" font-size="8" fill="#7a6a5a">9</text><text class="bed-label" x="630" y="125" text-anchor="middle" font-family="Arial" font-size="10" fill="#2a1a0a" font-weight="bold" transform="rotate(-90,630,115)"></text><text class="bed-note" x="630" y="143" text-anchor="middle" font-family="Arial" font-size="8.5" fill="#1a1a1a" font-weight="bold" transform="rotate(-90,630,133)"></text></g>
+  <!-- VT10 x=653 --><g class="bed-group" data-id="vt10"><rect class="bed-rect" x="653" y="44" width="40" height="155" rx="3" fill="#d9d1be" stroke="#b8a890" stroke-width="1"/><text x="657" y="57" font-family="Courier New" font-size="8" fill="#7a6a5a">10</text><text class="bed-label" x="673" y="125" text-anchor="middle" font-family="Arial" font-size="10" fill="#2a1a0a" font-weight="bold" transform="rotate(-90,673,115)"></text><text class="bed-note" x="673" y="143" text-anchor="middle" font-family="Arial" font-size="8.5" fill="#1a1a1a" font-weight="bold" transform="rotate(-90,673,133)"></text></g>
+  <!-- VT11 x=696 --><g class="bed-group" data-id="vt11"><rect class="bed-rect" x="696" y="44" width="40" height="155" rx="3" fill="#d9d1be" stroke="#b8a890" stroke-width="1"/><text x="700" y="57" font-family="Courier New" font-size="8" fill="#7a6a5a">11</text><text class="bed-label" x="716" y="125" text-anchor="middle" font-family="Arial" font-size="10" fill="#2a1a0a" font-weight="bold" transform="rotate(-90,716,115)"></text><text class="bed-note" x="716" y="143" text-anchor="middle" font-family="Arial" font-size="8.5" fill="#1a1a1a" font-weight="bold" transform="rotate(-90,716,133)"></text></g>
+
+  <!-- PATH horizontal bar — spans all 11 top beds then 10 middle cols -->
+  <rect x="266" y="203" width="470" height="16" fill="#ddd5c0" rx="2"/>
+  <text x="501" y="214" text-anchor="middle" font-family="Courier New" font-size="8" fill="#9a8a7a" letter-spacing="3">PATH</text>
+
+  <!-- ══════════ MIDDLE VERTICAL BEDS — 10 COLS, EACH SPLIT INTO TOP (a) + BOTTOM (b) ══════════
+    x=266 step=43, w=40, h=110, gap=10
+    Top half:    y=223, h=110 → bottom edge y=333
+    Bottom half: y=343, h=110 → bottom edge y=453
+    Cols 1-10: x=266,309,352,395,438,481,524,567,610,653
+    IDs: vla1/vlb1 … vla10/vlb10
+  -->
+
+  <!-- Col 1 x=266 -->
+  <g class="bed-group" data-id="vla1"><rect class="bed-rect" x="266" y="223" width="40" height="110" rx="3" fill="#d9d1be" stroke="#b8a890" stroke-width="1"/><text x="270" y="235" font-family="Courier New" font-size="8" fill="#7a6a5a">1a</text><text class="bed-label" x="286" y="278" text-anchor="middle" font-family="Arial" font-size="10" fill="#2a1a0a" font-weight="bold" transform="rotate(-90,286,268)"></text><text class="bed-note" x="286" y="296" text-anchor="middle" font-family="Arial" font-size="8.5" fill="#1a1a1a" font-weight="bold" transform="rotate(-90,286,286)"></text></g>
+  <g class="bed-group" data-id="vlb1"><rect class="bed-rect" x="266" y="343" width="40" height="110" rx="3" fill="#d9d1be" stroke="#b8a890" stroke-width="1"/><text x="270" y="355" font-family="Courier New" font-size="8" fill="#7a6a5a">1b</text><text class="bed-label" x="286" y="398" text-anchor="middle" font-family="Arial" font-size="10" fill="#2a1a0a" font-weight="bold" transform="rotate(-90,286,388)"></text><text class="bed-note" x="286" y="416" text-anchor="middle" font-family="Arial" font-size="8.5" fill="#1a1a1a" font-weight="bold" transform="rotate(-90,286,406)"></text></g>
+
+  <!-- Col 2 x=309 -->
+  <g class="bed-group" data-id="vla2"><rect class="bed-rect" x="309" y="223" width="40" height="110" rx="3" fill="#d9d1be" stroke="#b8a890" stroke-width="1"/><text x="313" y="235" font-family="Courier New" font-size="8" fill="#7a6a5a">2a</text><text class="bed-label" x="329" y="278" text-anchor="middle" font-family="Arial" font-size="10" fill="#2a1a0a" font-weight="bold" transform="rotate(-90,329,268)"></text><text class="bed-note" x="329" y="296" text-anchor="middle" font-family="Arial" font-size="8.5" fill="#1a1a1a" font-weight="bold" transform="rotate(-90,329,286)"></text></g>
+  <g class="bed-group" data-id="vlb2"><rect class="bed-rect" x="309" y="343" width="40" height="110" rx="3" fill="#d9d1be" stroke="#b8a890" stroke-width="1"/><text x="313" y="355" font-family="Courier New" font-size="8" fill="#7a6a5a">2b</text><text class="bed-label" x="329" y="398" text-anchor="middle" font-family="Arial" font-size="10" fill="#2a1a0a" font-weight="bold" transform="rotate(-90,329,388)"></text><text class="bed-note" x="329" y="416" text-anchor="middle" font-family="Arial" font-size="8.5" fill="#1a1a1a" font-weight="bold" transform="rotate(-90,329,406)"></text></g>
+
+  <!-- Col 3 x=352 -->
+  <g class="bed-group" data-id="vla3"><rect class="bed-rect" x="352" y="223" width="40" height="110" rx="3" fill="#d9d1be" stroke="#b8a890" stroke-width="1"/><text x="356" y="235" font-family="Courier New" font-size="8" fill="#7a6a5a">3a</text><text class="bed-label" x="372" y="278" text-anchor="middle" font-family="Arial" font-size="10" fill="#2a1a0a" font-weight="bold" transform="rotate(-90,372,268)"></text><text class="bed-note" x="372" y="296" text-anchor="middle" font-family="Arial" font-size="8.5" fill="#1a1a1a" font-weight="bold" transform="rotate(-90,372,286)"></text></g>
+  <g class="bed-group" data-id="vlb3"><rect class="bed-rect" x="352" y="343" width="40" height="110" rx="3" fill="#d9d1be" stroke="#b8a890" stroke-width="1"/><text x="356" y="355" font-family="Courier New" font-size="8" fill="#7a6a5a">3b</text><text class="bed-label" x="372" y="398" text-anchor="middle" font-family="Arial" font-size="10" fill="#2a1a0a" font-weight="bold" transform="rotate(-90,372,388)"></text><text class="bed-note" x="372" y="416" text-anchor="middle" font-family="Arial" font-size="8.5" fill="#1a1a1a" font-weight="bold" transform="rotate(-90,372,406)"></text></g>
+
+  <!-- Col 4 x=395 -->
+  <g class="bed-group" data-id="vla4"><rect class="bed-rect" x="395" y="223" width="40" height="110" rx="3" fill="#d9d1be" stroke="#b8a890" stroke-width="1"/><text x="399" y="235" font-family="Courier New" font-size="8" fill="#7a6a5a">4a</text><text class="bed-label" x="415" y="278" text-anchor="middle" font-family="Arial" font-size="10" fill="#2a1a0a" font-weight="bold" transform="rotate(-90,415,268)"></text><text class="bed-note" x="415" y="296" text-anchor="middle" font-family="Arial" font-size="8.5" fill="#1a1a1a" font-weight="bold" transform="rotate(-90,415,286)"></text></g>
+  <g class="bed-group" data-id="vlb4"><rect class="bed-rect" x="395" y="343" width="40" height="110" rx="3" fill="#d9d1be" stroke="#b8a890" stroke-width="1"/><text x="399" y="355" font-family="Courier New" font-size="8" fill="#7a6a5a">4b</text><text class="bed-label" x="415" y="398" text-anchor="middle" font-family="Arial" font-size="10" fill="#2a1a0a" font-weight="bold" transform="rotate(-90,415,388)"></text><text class="bed-note" x="415" y="416" text-anchor="middle" font-family="Arial" font-size="8.5" fill="#1a1a1a" font-weight="bold" transform="rotate(-90,415,406)"></text></g>
+
+  <!-- Col 5 x=438 -->
+  <g class="bed-group" data-id="vla5"><rect class="bed-rect" x="438" y="223" width="40" height="110" rx="3" fill="#d9d1be" stroke="#b8a890" stroke-width="1"/><text x="442" y="235" font-family="Courier New" font-size="8" fill="#7a6a5a">5a</text><text class="bed-label" x="458" y="278" text-anchor="middle" font-family="Arial" font-size="10" fill="#2a1a0a" font-weight="bold" transform="rotate(-90,458,268)"></text><text class="bed-note" x="458" y="296" text-anchor="middle" font-family="Arial" font-size="8.5" fill="#1a1a1a" font-weight="bold" transform="rotate(-90,458,286)"></text></g>
+  <g class="bed-group" data-id="vlb5"><rect class="bed-rect" x="438" y="343" width="40" height="110" rx="3" fill="#d9d1be" stroke="#b8a890" stroke-width="1"/><text x="442" y="355" font-family="Courier New" font-size="8" fill="#7a6a5a">5b</text><text class="bed-label" x="458" y="398" text-anchor="middle" font-family="Arial" font-size="10" fill="#2a1a0a" font-weight="bold" transform="rotate(-90,458,388)"></text><text class="bed-note" x="458" y="416" text-anchor="middle" font-family="Arial" font-size="8.5" fill="#1a1a1a" font-weight="bold" transform="rotate(-90,458,406)"></text></g>
+
+  <!-- Col 6 x=481 -->
+  <g class="bed-group" data-id="vla6"><rect class="bed-rect" x="481" y="223" width="40" height="110" rx="3" fill="#d9d1be" stroke="#b8a890" stroke-width="1"/><text x="485" y="235" font-family="Courier New" font-size="8" fill="#7a6a5a">6a</text><text class="bed-label" x="501" y="278" text-anchor="middle" font-family="Arial" font-size="10" fill="#2a1a0a" font-weight="bold" transform="rotate(-90,501,268)"></text><text class="bed-note" x="501" y="296" text-anchor="middle" font-family="Arial" font-size="8.5" fill="#1a1a1a" font-weight="bold" transform="rotate(-90,501,286)"></text></g>
+  <g class="bed-group" data-id="vlb6"><rect class="bed-rect" x="481" y="343" width="40" height="110" rx="3" fill="#d9d1be" stroke="#b8a890" stroke-width="1"/><text x="485" y="355" font-family="Courier New" font-size="8" fill="#7a6a5a">6b</text><text class="bed-label" x="501" y="398" text-anchor="middle" font-family="Arial" font-size="10" fill="#2a1a0a" font-weight="bold" transform="rotate(-90,501,388)"></text><text class="bed-note" x="501" y="416" text-anchor="middle" font-family="Arial" font-size="8.5" fill="#1a1a1a" font-weight="bold" transform="rotate(-90,501,406)"></text></g>
+
+  <!-- Col 7 x=524 (middle row only — no bottom bed) -->
+  <g class="bed-group" data-id="vla7"><rect class="bed-rect" x="524" y="223" width="40" height="110" rx="3" fill="#d9d1be" stroke="#b8a890" stroke-width="1"/><text x="528" y="235" font-family="Courier New" font-size="8" fill="#7a6a5a">7a</text><text class="bed-label" x="544" y="278" text-anchor="middle" font-family="Arial" font-size="10" fill="#2a1a0a" font-weight="bold" transform="rotate(-90,544,268)"></text><text class="bed-note" x="544" y="296" text-anchor="middle" font-family="Arial" font-size="8.5" fill="#1a1a1a" font-weight="bold" transform="rotate(-90,544,286)"></text></g>
+
+  <!-- Col 8 x=567 (middle row only — no bottom bed) -->
+  <g class="bed-group" data-id="vla8"><rect class="bed-rect" x="567" y="223" width="40" height="110" rx="3" fill="#d9d1be" stroke="#b8a890" stroke-width="1"/><text x="571" y="235" font-family="Courier New" font-size="8" fill="#7a6a5a">8a</text><text class="bed-label" x="587" y="278" text-anchor="middle" font-family="Arial" font-size="10" fill="#2a1a0a" font-weight="bold" transform="rotate(-90,587,268)"></text><text class="bed-note" x="587" y="296" text-anchor="middle" font-family="Arial" font-size="8.5" fill="#1a1a1a" font-weight="bold" transform="rotate(-90,587,286)"></text></g>
+
+  <!-- Col 9 x=610 (middle row only — no bottom bed) -->
+  <g class="bed-group" data-id="vla9"><rect class="bed-rect" x="610" y="223" width="40" height="110" rx="3" fill="#d9d1be" stroke="#b8a890" stroke-width="1"/><text x="614" y="235" font-family="Courier New" font-size="8" fill="#7a6a5a">9a</text><text class="bed-label" x="630" y="278" text-anchor="middle" font-family="Arial" font-size="10" fill="#2a1a0a" font-weight="bold" transform="rotate(-90,630,268)"></text><text class="bed-note" x="630" y="296" text-anchor="middle" font-family="Arial" font-size="8.5" fill="#1a1a1a" font-weight="bold" transform="rotate(-90,630,286)"></text></g>
+
+  <!-- Col 10 x=653 (middle row only — no bottom bed) -->
+  <g class="bed-group" data-id="vla10"><rect class="bed-rect" x="653" y="223" width="40" height="110" rx="3" fill="#d9d1be" stroke="#b8a890" stroke-width="1"/><text x="657" y="235" font-family="Courier New" font-size="8" fill="#7a6a5a">10a</text><text class="bed-label" x="673" y="278" text-anchor="middle" font-family="Arial" font-size="10" fill="#2a1a0a" font-weight="bold" transform="rotate(-90,673,268)"></text><text class="bed-note" x="673" y="296" text-anchor="middle" font-family="Arial" font-size="8.5" fill="#1a1a1a" font-weight="bold" transform="rotate(-90,673,286)"></text></g>
+
+</svg>
+
+<p class="note-hint">Right-click any bed to add/edit a note · notes appear as text on the bed</p>
+
+<div class="legend">
+  <h3>CROP LEGEND</h3>
+  <div class="legend-grid" id="legendGrid"></div>
+</div>
+
+<!-- Share Code modal -->
+<div class="modal-overlay" id="shareModal">
+  <div class="modal" id="shareModal">
+    <h3>Share Code</h3>
+    <p class="share-hint">Copy this text and send it to your coworker via text, email, or any messaging app.</p>
+    <textarea id="shareCodeText" readonly></textarea>
+    <div class="modal-actions">
+      <button class="btn-cancel" onclick="closeShareModal()">Close</button>
+      <button class="btn-copy" onclick="copyShareCode()">Copy to Clipboard</button>
+    </div>
+  </div>
+</div>
+
+<!-- Load Code modal -->
+<div class="modal-overlay" id="loadModal">
+  <div class="modal">
+    <h3>Load Code</h3>
+    <p class="share-hint">Paste the share code from your coworker below.</p>
+    <textarea id="loadCodeText" placeholder="Paste code here…"></textarea>
+    <div class="modal-actions">
+      <button class="btn-cancel" onclick="closeLoadModal()">Cancel</button>
+      <button class="btn-save" onclick="applyLoadCode()">Load Plan</button>
+    </div>
+  </div>
+</div>
+
+<div class="modal-overlay" id="noteModal">
+  <div class="modal">
+    <h3 id="noteModalTitle">Add Note</h3>
+    <textarea id="noteText" placeholder="Variety, date planted, companions, watering notes…"></textarea>
+    <div class="modal-actions">
+      <button class="btn-clr-note" onclick="clearNote()">Clear Note</button>
+      <button class="btn-cancel" onclick="closeModal()">Cancel</button>
+      <button class="btn-save" onclick="saveNote()">Save</button>
+    </div>
+  </div>
+</div>
+
+<script>
+const CROPS = [
+  { id:'tomato',      label:'Tomato',       color:'#c0392b' },
+  { id:'pepper',      label:'Pepper',        color:'#e67e22' },
+  { id:'squash',      label:'Squash',        color:'#f39c12' },
+  { id:'cucumber',    label:'Cucumber',      color:'#27ae60' },
+  { id:'lettuce',     label:'Lettuce',       color:'#2ecc71' },
+  { id:'herbs',       label:'Herbs',         color:'#1abc9c' },
+  { id:'carrot',      label:'Carrot',        color:'#e8820c' },
+  { id:'bean',        label:'Bean',          color:'#8e44ad' },
+  { id:'garlic',      label:'Garlic',        color:'#7f8c8d' },
+  { id:'sweetpotato', label:'Sweet Potato',  color:'#a0522d' },
+  { id:'flower',      label:'Flower',        color:'#e91e8c' },
+  { id:'brassica',    label:'Brassica',      color:'#16a085' },
+  { id:'melon',       label:'Melon',         color:'#76b52a' },
+  { id:'onion',       label:'Onion/Allium',  color:'#9b59b6' },
+  { id:'corn',        label:'Corn',          color:'#d4ac0d' },
+  { id:'covercrop',   label:'Cover Crop',    color:'#5d4037' },
+  { id:'leafygreens', label:'Leafy Greens',  color:'#388e3c' },
+  { id:'radish',      label:'Radish',        color:'#e53935' },
+  { id:'beets',       label:'Beets',         color:'#880e4f' },
+];
+const CLEAR = { id:'', label:'Clear', color:'#ccc' };
+let selectedCrop = null, bedData = {}, editingBedId = null;
+
+function buildCropPanel() {
+  const grid = document.getElementById('cropGrid');
+  const cb = makeCropBtn(CLEAR); cb.classList.add('clr'); grid.appendChild(cb);
+  CROPS.forEach(c => grid.appendChild(makeCropBtn(c)));
+}
+function makeCropBtn(crop) {
+  const btn = document.createElement('button');
+  btn.className = 'crop-btn'; btn.dataset.id = crop.id;
+  btn.innerHTML = `<span class="sw" style="background:${crop.color}"></span>${crop.label}`;
+  btn.addEventListener('click', () => selectCrop(crop));
+  return btn;
+}
+function selectCrop(crop) {
+  selectedCrop = crop.id === '' ? null : crop;
+  document.querySelectorAll('.crop-btn').forEach(b =>
+    b.classList.toggle('active', b.dataset.id === crop.id));
+}
+
+function wireBeds() {
+  document.querySelectorAll('.bed-group').forEach(g => {
+    const id = g.dataset.id;
+    g.style.cursor = 'pointer';
+    g.addEventListener('click', () => paintBed(id));
+    g.addEventListener('contextmenu', e => { e.preventDefault(); openModal(id); });
+  });
+}
+
+function paintBed(id) {
+  if (!bedData[id]) bedData[id] = {};
+  bedData[id].crop = selectedCrop || null;
+  renderBed(id);
+}
+
+function hex2rgb(hex) {
+  const r = parseInt(hex.slice(1,3),16), g = parseInt(hex.slice(3,5),16), b = parseInt(hex.slice(5,7),16);
+  return [r,g,b];
+}
+
+function renderBed(id) {
+  const g = document.querySelector(`.bed-group[data-id="${id}"]`);
+  if (!g) return;
+  const data = bedData[id] || {};
+  const crop = data.crop;
+  const note = data.note || '';
+  const rect = g.querySelector('.bed-rect');
+  if (rect) {
+    if (crop) {
+      const [r,gr,b] = hex2rgb(crop.color);
+      rect.setAttribute('fill', `rgba(${r},${gr},${b},0.35)`);
+      rect.setAttribute('stroke', crop.color);
+      rect.setAttribute('stroke-width', '2');
+    } else {
+      rect.setAttribute('fill', '#d9d1be');
+      rect.setAttribute('stroke', '#b8a890');
+      rect.setAttribute('stroke-width', '1');
+    }
+  }
+  const lbl = g.querySelector('.bed-label');
+  const noteEl = g.querySelector('.bed-note');
+  const rect2 = g.querySelector('.bed-rect');
+
+  if (id.startsWith('h')) {
+    // HORIZONTAL BED: crop name left-center, note right-side
+    const bx = parseFloat(rect2 ? rect2.getAttribute('x') : 30);
+    const bw = parseFloat(rect2 ? rect2.getAttribute('width') : 210);
+    const by = parseFloat(rect2 ? rect2.getAttribute('y') : 44);
+    const bh = parseFloat(rect2 ? rect2.getAttribute('height') : 28);
+    const midY = by + bh * 0.67;
+
+    if (lbl) {
+      lbl.textContent = crop ? crop.label : '';
+      lbl.setAttribute('x', bx + bw * 0.35);
+      lbl.setAttribute('y', midY);
+      lbl.setAttribute('text-anchor', 'middle');
+      lbl.removeAttribute('transform');
+    }
+    if (noteEl) {
+      noteEl.textContent = note ? (note.length > 16 ? note.slice(0,14)+'…' : note) : '';
+      noteEl.setAttribute('x', bx + bw - 6);
+      noteEl.setAttribute('y', midY);
+      noteEl.setAttribute('text-anchor', 'end');
+      noteEl.removeAttribute('transform');
+      noteEl.setAttribute('font-style', note ? 'italic' : 'normal');
+    }
+  } else {
+    // VERTICAL BED: crop name upper portion, note lower portion
+    const bx = parseFloat(rect2 ? rect2.getAttribute('x') : 266);
+    const bw = parseFloat(rect2 ? rect2.getAttribute('width') : 40);
+    const by = parseFloat(rect2 ? rect2.getAttribute('y') : 44);
+    const bh = parseFloat(rect2 ? rect2.getAttribute('height') : 110);
+    const cx = bx + bw / 2;
+
+    if (lbl) {
+      lbl.textContent = crop ? crop.label : '';
+      const ly = by + bh * 0.32;
+      lbl.setAttribute('x', cx);
+      lbl.setAttribute('y', ly);
+      lbl.setAttribute('text-anchor', 'middle');
+      lbl.setAttribute('transform', `rotate(-90,${cx},${ly})`);
+    }
+    if (noteEl) {
+      noteEl.textContent = note ? (note.length > 12 ? note.slice(0,10)+'…' : note) : '';
+      const ny = by + bh * 0.72;
+      noteEl.setAttribute('x', cx);
+      noteEl.setAttribute('y', ny);
+      noteEl.setAttribute('text-anchor', 'middle');
+      noteEl.setAttribute('transform', `rotate(-90,${cx},${ny})`);
+      noteEl.setAttribute('font-style', note ? 'italic' : 'normal');
+    }
+  }
+}
+
+function renderAll() { Object.keys(bedData).forEach(renderBed); }
+
+function openModal(bedId) {
+  editingBedId = bedId;
+  document.getElementById('noteModalTitle').textContent = 'Note — Bed ' + bedId.toUpperCase();
+  document.getElementById('noteText').value = (bedData[bedId] || {}).note || '';
+  document.getElementById('noteModal').classList.add('open');
+  setTimeout(() => document.getElementById('noteText').focus(), 50);
+}
+function closeModal() {
+  document.getElementById('noteModal').classList.remove('open');
+  editingBedId = null;
+}
+function saveNote() {
+  if (!editingBedId) return;
+  if (!bedData[editingBedId]) bedData[editingBedId] = {};
+  bedData[editingBedId].note = document.getElementById('noteText').value.trim();
+  renderBed(editingBedId);
+  closeModal();
+}
+function clearNote() {
+  if (!editingBedId) return;
+  if (bedData[editingBedId]) bedData[editingBedId].note = '';
+  renderBed(editingBedId);
+  closeModal();
+}
+document.getElementById('noteModal').addEventListener('click', function(e) {
+  if (e.target === this) closeModal();
+});
+
+function clearAll() {
+  if (!confirm('Clear all beds and notes?')) return;
+  bedData = {};
+  document.querySelectorAll('.bed-group').forEach(g => {
+    const rect = g.querySelector('.bed-rect');
+    if (rect) { rect.setAttribute('fill','#d9d1be'); rect.setAttribute('stroke','#b8a890'); rect.setAttribute('stroke-width','1'); }
+    const lbl = g.querySelector('.bed-label'); if (lbl) lbl.textContent = '';
+    const noteEl = g.querySelector('.bed-note'); if (noteEl) noteEl.textContent = '';
+  });
+}
+function exportData() {
+  const blob = new Blob([JSON.stringify(bedData,null,2)],{type:'application/json'});
+  const a = document.createElement('a'); a.href = URL.createObjectURL(blob);
+  a.download = 'farm-plan.json'; a.click();
+}
+function importData() {
+  const input = document.createElement('input');
+  input.type = 'file'; input.accept = '.json';
+  input.onchange = e => {
+    const file = e.target.files[0]; if (!file) return;
+    const r = new FileReader();
+    r.onload = ev => { try { bedData = JSON.parse(ev.target.result); renderAll(); } catch { alert('Invalid JSON.'); } };
+    r.readAsText(file);
+  };
+  input.click();
+}
+
+function buildLegend() {
+  const grid = document.getElementById('legendGrid');
+  CROPS.forEach(c => {
+    const item = document.createElement('div');
+    item.className = 'legend-item';
+    item.innerHTML = `<span class="legend-swatch" style="background:${c.color}"></span>${c.label}`;
+    grid.appendChild(item);
+  });
+}
+
+// ── Share Code ──────────────────────────────────────────
+function openShareModal() {
+  const code = btoa(unescape(encodeURIComponent(JSON.stringify(bedData))));
+  document.getElementById('shareCodeText').value = code;
+  document.getElementById('shareModal').classList.add('open');
+}
+function closeShareModal() {
+  document.getElementById('shareModal').classList.remove('open');
+}
+function copyShareCode() {
+  const ta = document.getElementById('shareCodeText');
+  ta.select();
+  navigator.clipboard.writeText(ta.value).then(() => {
+    const btn = document.querySelector('#shareModal .btn-copy');
+    btn.textContent = '✓ Copied!';
+    setTimeout(() => { btn.textContent = 'Copy to Clipboard'; }, 2000);
+  }).catch(() => {
+    document.execCommand('copy');
+  });
+}
+document.getElementById('shareModal').addEventListener('click', function(e) {
+  if (e.target === this) closeShareModal();
+});
+
+// ── Load Code ────────────────────────────────────────────
+function openLoadModal() {
+  document.getElementById('loadCodeText').value = '';
+  document.getElementById('loadModal').classList.add('open');
+  setTimeout(() => document.getElementById('loadCodeText').focus(), 50);
+}
+function closeLoadModal() {
+  document.getElementById('loadModal').classList.remove('open');
+}
+function applyLoadCode() {
+  const raw = document.getElementById('loadCodeText').value.trim();
+  if (!raw) return;
+  try {
+    const data = JSON.parse(decodeURIComponent(escape(atob(raw))));
+    bedData = data;
+    renderAll();
+    closeLoadModal();
+  } catch(e) {
+    alert('Invalid code — make sure you pasted the full share code.');
+  }
+}
+document.getElementById('loadModal').addEventListener('click', function(e) {
+  if (e.target === this) closeLoadModal();
+});
+
+buildCropPanel();
+wireBeds();
+buildLegend();
+</script>
+</body>
+</html>
